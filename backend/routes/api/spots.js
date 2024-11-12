@@ -1,6 +1,6 @@
 const express = require('express');
 const { Op } = require('sequelize');
-const { Spot, SpotImage, Review, User, ReviewImage } = require('../../db/models');
+const { Spot, SpotImage, Review, User, ReviewImage, Booking } = require('../../db/models');
 const { requireAuth } = require('../../utils/auth');
 const { check } = require('express-validator');
 const { handleValidationErrors } = require('../../utils/validation');
@@ -65,8 +65,6 @@ router.get("/", async (req, res, next) => {
 
       // apply pagination with default values and validate them
       const pagination = {};
-
-      //! test
 
       const errors = {};
 
@@ -167,65 +165,7 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-// // **Get All Spots Owned by the Current User**
-// router.get('/current', requireAuth, async (req, res) => {
-//   const { user } = req;
-
-//   const spots = await Spot.findAll({
-//     where: { ownerId: user.id },
-//   //   include: [{model: Review, attributes: ['stars'] },{ model: SpotImage, where: { preview: true }, required: false }]
-//   // });
-//   include: [{model: Review, attributes: ['stars'] },{ model:SpotImage, attributes: ['url']}]
-// });
-
-// const spotList = spots.map(spot => {
-
-//   const spotData = spot.toJSON();
-
-//   const avgRating = spotData.Reviews && spotData.Reviews.length > 0
-
-//       ? spotData.Reviews.reduce((acc, review) => acc + review.stars, 0) / spotData.Reviews.length
-
-//       : 0;
-
-//   const previewImage = spot.SpotImages[0] ? spot.SpotImages[0].url : null;
-
-//   delete spotData.SpotImages;
-//   delete spotData.Reviews
-
-//   // combine each spot with avgRating and previewImage to create spotDetails
-
-//   return {
-//       ...spotData,
-//       avgRating,
-//       previewImage
-//   };
-// });
-
-//   const formattedSpots = spots.map(spot => ({
-//     id: spot.id,
-//     ownerId: spot.ownerId,
-//     address: spot.address,
-//     avgRating: spot.avgRating,
-//     city: spot.city,
-//     state: spot.state,
-//     country: spot.country,
-//     createdAt: spot.createdAt,
-//     lat: spot.lat,
-//     lng: spot.lng,
-//     name: spot.name,
-//     description: spot.description,
-//     price: spot.price,
-//     updatedAt: spot.updatedAt,
-//     previewImage: spot.SpotImages?.[0]?.url || null
-//   }));
-
-//   res.json({ Spots: formattedSpots });
-// });
-
 router.get('/current', requireAuth, async (req, res, next) => {
-
-  // res.send("Spots-owned-by-current-user") //* Test Route
 
   // Get the current user
 
@@ -620,5 +560,120 @@ router.post('/:spotId/reviews', requireAuth, async (req, res) => {
   }
 });
 
+
+// GET /api/spots/:spotId/bookings
+router.get('/:spotId/bookings', requireAuth, async (req, res) => {
+  const { user } = req;
+  const { spotId } = req.params;
+
+  try {
+    // Find the spot to check if it exists
+    const spot = await Spot.findByPk(spotId);
+    if (!spot) {
+      return res.status(404).json({ message: "Spot couldn't be found" });
+    }
+
+    // Check if the current user is the owner of the spot
+    const isOwner = spot.ownerId === user.id;
+
+    // Fetch bookings based on user ownership
+    const bookings = await Booking.findAll({
+      where: { spotId },
+      attributes: isOwner
+        ? undefined // Fetch all attributes if the user is the owner
+        : ['spotId', 'startDate', 'endDate'], // Limited attributes if not the owner
+      include: isOwner
+        ? [
+            { model: User, attributes: ['id', 'firstName', 'lastName'] }
+          ]
+        : [] // No additional models included if not the owner
+    });
+
+    // Format and send the response
+    res.status(200).json({ Bookings: bookings });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Something went wrong while fetching bookings.' });
+  }
+});
+
+// POST /api/spots/:spotId/bookings
+router.post('/:spotId/bookings', requireAuth, async (req, res) => {
+  const { user } = req;
+  const { spotId } = req.params;
+  const { startDate, endDate } = req.body;
+
+  try {
+    // Check if the spot exists
+    const spot = await Spot.findByPk(spotId);
+    if (!spot) {
+      return res.status(404).json({ message: "Spot couldn't be found" });
+    }
+
+    // Ensure the spot does not belong to the current user
+    if (spot.ownerId === user.id) {
+      return res.status(403).json({ message: "You cannot book your own spot" });
+    }
+
+    // Validate the dates
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (start < new Date()) {
+      return res.status(400).json({
+        message: "Bad Request",
+        errors: { startDate: "startDate cannot be in the past" }
+      });
+    }
+    if (end <= start) {
+      return res.status(400).json({
+        message: "Bad Request",
+        errors: { endDate: "endDate cannot be on or before startDate" }
+      });
+    }
+
+    // Check for booking conflicts
+    const conflictingBookings = await Booking.findAll({
+      where: {
+        spotId,
+        [Op.or]: [
+          {
+            startDate: { [Op.between]: [startDate, endDate] }
+          },
+          {
+            endDate: { [Op.between]: [startDate, endDate] }
+          },
+          {
+            startDate: { [Op.lte]: startDate },
+            endDate: { [Op.gte]: endDate }
+          }
+        ]
+      }
+    });
+
+    if (conflictingBookings.length > 0) {
+      return res.status(403).json({
+        message: "Sorry, this spot is already booked for the specified dates",
+        errors: {
+          startDate: "Start date conflicts with an existing booking",
+          endDate: "End date conflicts with an existing booking"
+        }
+      });
+    }
+
+    // Create the new booking
+    const newBooking = await Booking.create({
+      spotId,
+      userId: user.id,
+      startDate,
+      endDate
+    });
+
+    // Respond with the new booking details
+    res.status(201).json(newBooking);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Something went wrong while creating the booking." });
+  }
+});
 
 module.exports = router;
