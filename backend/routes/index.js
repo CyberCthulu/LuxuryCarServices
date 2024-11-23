@@ -34,4 +34,10 @@ router.get('/api/csrf/restore', (req, res) => {
   }
 });
 
+// Temporary test route for CSRF testing
+router.post('/api/test', (req, res) => {
+  return res.json({ requestBody: req.body });
+});
+
+
 module.exports = router;

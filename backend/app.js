@@ -45,17 +45,17 @@ app.use(
 );
 
 // Middleware to include CSRF token in responses (after CSRF initialization)
-app.use((req, res, next) => {
-  try {
-    const csrfToken = req.csrfToken(); // Generate CSRF token
-    res.cookie('XSRF-TOKEN', csrfToken); // Set token in cookie
-    res.locals.csrfToken = csrfToken; // Optional: Use in templates
-    next();
-  } catch (error) {
-    console.error('CSRF Token Error:', error); // Handle CSRF errors gracefully
-    next(error);
-  }
-});
+// app.use((req, res, next) => {
+//   try {
+//     const csrfToken = req.csrfToken(); // Generate CSRF token
+//     res.cookie('XSRF-TOKEN', csrfToken); // Set token in cookie
+//     res.locals.csrfToken = csrfToken; // Optional: Use in templates
+//     next();
+//   } catch (error) {
+//     console.error('CSRF Token Error:', error); // Handle CSRF errors gracefully
+//     next(error);
+//   }
+// });
 
 // Restore user session
 app.use(restoreUser);
